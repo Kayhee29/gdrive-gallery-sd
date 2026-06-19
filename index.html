@@ -158,7 +158,8 @@
             lightboxIndex: null,
             userInfo: null,
             isSdkReady: false,
-            isSharedView: !!(sharedFolder && sharedApiKey)
+            isSharedView: !!(sharedFolder && sharedApiKey),
+            videoPlayerMode: 'iframe'
         };
 
         // DOM elements
@@ -647,24 +648,71 @@
         };
 
         // Render Lightbox Content
+        // Thay đổi chế độ phát video (Iframe Google Player hoặc HTML5 Video trực tiếp)
+        window.setVideoPlayerMode = (mode) => {
+            state.videoPlayerMode = mode;
+            renderLightbox();
+        };
+
+        // Render Lightbox Content
         function renderLightbox() {
             if (state.lightboxIndex === null || state.images.length === 0) return;
             const file = state.images[state.lightboxIndex];
             const isVideo = file.mimeType && file.mimeType.startsWith('video/');
 
             let mediaHtml = '';
+            let modeSelectorHtml = '';
+
             if (isVideo) {
-                // Sử dụng Google Drive Preview Player (Iframe) để tận dụng hạ tầng stream YouTube của Google (hết giật lag)
-                const embedUrl = `https://drive.google.com/file/d/${file.id}/preview`;
-                mediaHtml = `
-                    <iframe
-                        src="${embedUrl}"
-                        class="w-[85vw] h-[55vh] sm:w-[80vw] sm:h-[65vh] max-w-4xl rounded-xl shadow-2xl border-0 bg-black"
-                        allow="autoplay; encrypted-media; picture-in-picture"
-                        allowfullscreen
-                        onclick="event.stopPropagation()"
-                    ></iframe>
+                // Hiển thị thanh tab lựa chọn trình phát để xử lý video đang load/xử lý
+                const isIframe = state.videoPlayerMode === 'iframe';
+                modeSelectorHtml = `
+                    <div class="flex justify-center gap-2 mb-4 z-10" onclick="event.stopPropagation()">
+                        <button
+                            onclick="setVideoPlayerMode('iframe')"
+                            class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 ${isIframe ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}"
+                        >
+                            🎬 Google Stream (Mượt)
+                        </button>
+                        <button
+                            onclick="setVideoPlayerMode('native')"
+                            class="px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 ${!isIframe ? 'bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}"
+                        >
+                            ⚠️ HTML5 Player (Dự phòng cho video đang xử lý)
+                        </button>
+                    </div>
                 `;
+
+                if (isIframe) {
+                    // Sử dụng Google Drive Preview Player (Iframe) - hạ tầng YouTube
+                    const embedUrl = `https://drive.google.com/file/d/${file.id}/preview`;
+                    mediaHtml = `
+                        <iframe
+                            src="${embedUrl}"
+                            class="w-[85vw] h-[55vh] sm:w-[80vw] sm:h-[65vh] max-w-4xl rounded-xl shadow-2xl border-0 bg-black"
+                            allow="autoplay; encrypted-media; picture-in-picture"
+                            allowfullscreen
+                            onclick="event.stopPropagation()"
+                        ></iframe>
+                    `;
+                } else {
+                    // Trình phát trực tiếp HTML5 (Dự phòng cho video chưa xử lý xong trên GDrive)
+                    let videoUrl = '';
+                    if (state.accessToken) {
+                        videoUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&access_token=${state.accessToken}`;
+                    } else if (state.apiKey.trim()) {
+                        videoUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${state.apiKey.trim()}`;
+                    }
+                    mediaHtml = `
+                        <video
+                            src="${videoUrl}"
+                            controls
+                            autoplay
+                            class="w-[85vw] h-[55vh] sm:w-[80vw] sm:h-[65vh] max-w-4xl rounded-xl shadow-2xl focus:outline-none bg-black"
+                            onclick="event.stopPropagation()"
+                        ></video>
+                    `;
+                }
             } else {
                 const highResUrl = file.thumbnailLink ? file.thumbnailLink.replace(/=s\d+/, '=w1600') : '';
                 mediaHtml = `
@@ -687,6 +735,9 @@
                         <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
                     </svg>
                 </button>
+
+                <!-- Chọn chế độ trình phát cho Video -->
+                ${modeSelectorHtml}
 
                 <!-- Ảnh/Video Phóng To -->
                 <div class="relative max-w-5xl max-h-[80vh] flex items-center justify-center">
