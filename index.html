@@ -313,12 +313,12 @@
                     state.loadingProgress = `Đang quét Folder ID: ${folderId} (Trang ${pageCount}, đã tìm thấy ${allFiles.length} ảnh)`;
                     renderLoading();
 
-                    let query = `'${folderId}' in parents and mimeType contains 'image/' and trashed = false`;
+                    let query = `'${folderId}' in parents and (mimeType contains 'image/' or mimeType contains 'video/') and trashed = false`;
                     let url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}` +
                         `&pageSize=100` +
                         `&supportsAllDrives=true` +
                         `&includeItemsFromAllDrives=true` +
-                        `&fields=nextPageToken,files(id,name,webContentLink,thumbnailLink,size)`;
+                        `&fields=nextPageToken,files(id,name,webContentLink,thumbnailLink,size,mimeType)`;
 
                     if (nextPageToken) {
                         url += `&pageToken=${nextPageToken}`;
@@ -423,6 +423,43 @@
             }
         }
 
+        // Sao chép văn bản vào bộ nhớ tạm (Hỗ trợ cả HTTP và HTTPS)
+        function copyToClipboard(text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => {
+                    alert('Đã sao chép link chia sẻ vào bộ nhớ tạm! Gửi link này cho bất kỳ ai để xem ảnh trực tiếp.');
+                }).catch(err => {
+                    fallbackCopyTextToClipboard(text);
+                });
+            } else {
+                fallbackCopyTextToClipboard(text);
+            }
+        }
+
+        function fallbackCopyTextToClipboard(text) {
+            const textArea = document.createElement("textarea");
+            textArea.value = text;
+            textArea.style.top = "0";
+            textArea.style.left = "0";
+            textArea.style.position = "fixed";
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    alert('Đã sao chép link chia sẻ vào bộ nhớ tạm! Gửi link này cho bất kỳ ai để xem ảnh trực tiếp.');
+                } else {
+                    window.prompt('Không thể tự động sao chép. Vui lòng nhấn Ctrl+C để copy link sau:', text);
+                }
+            } catch (err) {
+                window.prompt('Không thể tự động sao chép. Vui lòng nhấn Ctrl+C để copy link sau:', text);
+            }
+
+            document.body.removeChild(textArea);
+        }
+
         // Tạo Link Chia Sẻ
         window.generateShareLink = () => {
             const folderId = extractFolderId(state.folderUrl);
@@ -438,12 +475,8 @@
             const baseUrl = window.location.origin + window.location.pathname;
             const shareUrl = `${baseUrl}?folder=${encodeURIComponent(folderId)}&apiKey=${encodeURIComponent(state.apiKey.trim())}`;
 
-            // Copy vào clipboard
-            navigator.clipboard.writeText(shareUrl).then(() => {
-                alert('Đã sao chép link chia sẻ vào bộ nhớ tạm! Gửi link này cho bất kỳ ai để xem ảnh trực tiếp.');
-            }).catch(err => {
-                showError('Không thể tự động copy. Hãy copy link thủ công sau: ' + shareUrl);
-            });
+            // Thực hiện copy
+            copyToClipboard(shareUrl);
         };
 
         // Render User Info
@@ -477,12 +510,22 @@
 
                 galleryGrid.innerHTML = state.images.map((file, idx) => {
                     const highResThumb = file.thumbnailLink ? file.thumbnailLink.replace(/=s\d+/, '=w400') : '';
+                    const isVideo = file.mimeType && file.mimeType.startsWith('video/');
+                    const videoBadge = isVideo ? `
+                        <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-bold text-emerald-400 flex items-center gap-1 z-10 border border-slate-700/50">
+                            <svg class="w-2.5 h-2.5 fill-current" viewBox="0 0 24 24">
+                                <path d="M8 5v14l11-7z"/>
+                            </svg>
+                            VIDEO
+                        </div>
+                    ` : '';
                     return `
                         <div class="group bg-slate-900 border border-slate-800/80 rounded-xl overflow-hidden shadow-md hover:shadow-xl hover:border-slate-700 transition duration-300 flex flex-col justify-between">
                             <div
                                 onclick="openLightbox(${idx})"
                                 class="relative aspect-square bg-slate-950 overflow-hidden cursor-pointer flex items-center justify-center"
                             >
+                                ${videoBadge}
                                 <img
                                     src="${highResThumb}"
                                     alt="${escapeHtml(file.name)}"
@@ -566,7 +609,36 @@
         function renderLightbox() {
             if (state.lightboxIndex === null || state.images.length === 0) return;
             const file = state.images[state.lightboxIndex];
-            const highResUrl = file.thumbnailLink ? file.thumbnailLink.replace(/=s\d+/, '=w1600') : '';
+            const isVideo = file.mimeType && file.mimeType.startsWith('video/');
+
+            let mediaHtml = '';
+            if (isVideo) {
+                let videoUrl = '';
+                if (state.accessToken) {
+                    videoUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&access_token=${state.accessToken}`;
+                } else if (state.apiKey.trim()) {
+                    videoUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${state.apiKey.trim()}`;
+                }
+                mediaHtml = `
+                    <video
+                        src="${videoUrl}"
+                        controls
+                        autoplay
+                        class="max-w-full max-h-[80vh] rounded shadow-2xl focus:outline-none"
+                        onclick="event.stopPropagation()"
+                    ></video>
+                `;
+            } else {
+                const highResUrl = file.thumbnailLink ? file.thumbnailLink.replace(/=s\d+/, '=w1600') : '';
+                mediaHtml = `
+                    <img
+                        src="${highResUrl}"
+                        alt="Phóng to"
+                        class="max-w-full max-h-[80vh] object-contain rounded shadow-2xl"
+                        onclick="event.stopPropagation()"
+                    />
+                `;
+            }
 
             lightboxContainer.innerHTML = `
                 <!-- Nút Đóng -->
@@ -579,7 +651,7 @@
                     </svg>
                 </button>
 
-                <!-- Ảnh Phóng To -->
+                <!-- Ảnh/Video Phóng To -->
                 <div class="relative max-w-5xl max-h-[80vh] flex items-center justify-center">
                     <!-- Nút Trước -->
                     <button
@@ -591,12 +663,7 @@
                         </svg>
                     </button>
 
-                    <img
-                        src="${highResUrl}"
-                        alt="Phóng to"
-                        class="max-w-full max-h-[80vh] object-contain rounded shadow-2xl"
-                        onclick="event.stopPropagation()"
-                    />
+                    ${mediaHtml}
 
                     <!-- Nút Tiếp Theo -->
                     <button
@@ -613,14 +680,14 @@
                 <div class="mt-4 text-center max-w-xl" onclick="event.stopPropagation()">
                     <p class="text-sm font-semibold text-white truncate">${escapeHtml(file.name)}</p>
                     <div class="mt-2 flex items-center justify-center gap-3">
-                        <span class="text-xs text-slate-400">Ảnh ${state.lightboxIndex + 1} / ${state.images.length}</span>
+                        <span class="text-xs text-slate-400">${isVideo ? 'Video' : 'Ảnh'} ${state.lightboxIndex + 1} / ${state.images.length}</span>
                         <a
                             href="${file.webContentLink}"
                             download
                             target="_blank"
                             class="bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-xs font-bold px-4 py-1.5 rounded-lg transition flex items-center gap-1.5"
                         >
-                            Tải ảnh gốc
+                            Tải file gốc
                         </a>
                     </div>
                 </div>
