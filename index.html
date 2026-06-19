@@ -320,6 +320,10 @@
                         `&includeItemsFromAllDrives=true` +
                         `&fields=nextPageToken,files(id,name,webContentLink,thumbnailLink,size)`;
 
+                    if (nextPageToken) {
+                        url += `&pageToken=${nextPageToken}`;
+                    }
+
                     // Nếu dùng API Key (không có accessToken), ta truyền qua tham số key
                     if (!state.accessToken && state.apiKey.trim()) {
                         url += `&key=${state.apiKey.trim()}`;
