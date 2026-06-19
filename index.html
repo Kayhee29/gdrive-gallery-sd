@@ -344,9 +344,14 @@
                     const data = await response.json();
 
                     if (data.files && data.files.length > 0) {
+                        const prevLength = allFiles.length;
                         allFiles = allFiles.concat(data.files);
                         state.images = allFiles;
-                        renderGallery();
+                        
+                        imageCountVal.innerText = state.images.length;
+                        imageCountContainer.classList.remove('hidden');
+                        
+                        appendGallery(data.files, prevLength);
                     }
 
                     nextPageToken = data.nextPageToken || '';
@@ -502,63 +507,99 @@
             }
         }
 
+        // Append ảnh/video vào cuối danh sách hiện có (Tối ưu hóa hiệu năng, tránh re-render lại DOM cũ)
+        function appendGallery(files, startIndex) {
+            if (startIndex === 0) {
+                galleryGrid.innerHTML = '';
+            }
+
+            const html = files.map((file, idx) => {
+                const globalIdx = startIndex + idx;
+                const highResThumb = file.thumbnailLink ? file.thumbnailLink.replace(/=s\d+/, '=w400') : '';
+                const isVideo = file.mimeType && file.mimeType.startsWith('video/');
+                const videoBadge = isVideo ? `
+                    <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-bold text-emerald-400 flex items-center gap-1 z-10 border border-slate-700/50">
+                        <svg class="w-2.5 h-2.5 fill-current" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z"/>
+                        </svg>
+                        VIDEO
+                    </div>
+                ` : '';
+
+                // Hỗ trợ hiển thị SVG Placeholder cao cấp nếu file chưa hoàn thành xử lý ảnh thu nhỏ trên GDrive
+                let thumbHtml = '';
+                if (highResThumb) {
+                    thumbHtml = `
+                        <img
+                            src="${highResThumb}"
+                            alt="${escapeHtml(file.name)}"
+                            class="object-cover w-full h-full transform group-hover:scale-105 transition duration-500"
+                            loading="lazy"
+                        />
+                    `;
+                } else {
+                    thumbHtml = `
+                        <div class="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-slate-500 group-hover:text-slate-400 transition duration-300 p-4">
+                            ${isVideo ? `
+                                <svg class="w-8 h-8 mb-1.5 stroke-current" fill="none" stroke-width="1.5" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 01-1.125-1.125M3.375 19.5h1.5C5.072 19.5 5.25 18.2 5.25 17m-3-13.5h18.75m-18.75 0a1.125 1.125 0 00-1.125 1.125M3.375 4.5h1.5C5.072 4.5 5.25 5.8 5.25 7m0 10v-10m0 10h1.5C7.572 17 7.75 18.2 7.75 19.5m0-15h1.5C10.072 4.5 10.25 5.8 10.25 7m0 10h1.5C13.572 17 13.75 18.2 13.75 19.5m0-15h1.5C16.072 4.5 16.25 5.8 16.25 7m0 10h1.5C19.572 17 19.75 18.2 19.75 19.5m0-15h1.5c.621 0 .8.8.8 2m0 10h1.5c.621 0 .8-.8.8-2m-13.5-5h7.5m-7.5 3h7.5" />
+                                </svg>
+                                <span class="text-[9px] font-bold uppercase tracking-wider text-slate-400">Trình phát Video</span>
+                            ` : `
+                                <svg class="w-8 h-8 mb-1.5 stroke-current" fill="none" stroke-width="1.5" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375 0 11-.75 0 .375 0 01.75 0z" />
+                                </svg>
+                                <span class="text-[9px] font-bold uppercase tracking-wider text-slate-400">Không có ảnh</span>
+                            `}
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div class="group bg-slate-900 border border-slate-800/80 rounded-xl overflow-hidden shadow-md hover:shadow-xl hover:border-slate-700 transition duration-300 flex flex-col justify-between animate-fade-in">
+                        <div
+                            onclick="openLightbox(${globalIdx})"
+                            class="relative aspect-square bg-slate-950 overflow-hidden cursor-pointer flex items-center justify-center"
+                        >
+                            ${videoBadge}
+                            ${thumbHtml}
+                            <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition duration-300 flex items-center justify-center">
+                                <span class="bg-white/10 backdrop-blur-md p-2.5 rounded-full border border-white/20">
+                                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7"></path>
+                                    </svg>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="p-3 bg-slate-900/90 border-t border-slate-800/50">
+                            <p class="text-xs font-medium text-slate-300 truncate mb-2.5" title="${escapeHtml(file.name)}">
+                                ${escapeHtml(file.name)}
+                            </p>
+                            <a
+                                href="${file.webContentLink}"
+                                download
+                                target="_blank"
+                                class="w-full flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-[11px] font-bold py-1.5 px-3 rounded-lg transition duration-200"
+                            >
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"></path>
+                                </svg>
+                                Tải Xuống
+                            </a>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            galleryGrid.insertAdjacentHTML('beforeend', html);
+        }
+
         // Render Gallery Grid & Image Counter
         function renderGallery() {
             if (state.images.length > 0) {
                 imageCountVal.innerText = state.images.length;
                 imageCountContainer.classList.remove('hidden');
-
-                galleryGrid.innerHTML = state.images.map((file, idx) => {
-                    const highResThumb = file.thumbnailLink ? file.thumbnailLink.replace(/=s\d+/, '=w400') : '';
-                    const isVideo = file.mimeType && file.mimeType.startsWith('video/');
-                    const videoBadge = isVideo ? `
-                        <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded text-[10px] font-bold text-emerald-400 flex items-center gap-1 z-10 border border-slate-700/50">
-                            <svg class="w-2.5 h-2.5 fill-current" viewBox="0 0 24 24">
-                                <path d="M8 5v14l11-7z"/>
-                            </svg>
-                            VIDEO
-                        </div>
-                    ` : '';
-                    return `
-                        <div class="group bg-slate-900 border border-slate-800/80 rounded-xl overflow-hidden shadow-md hover:shadow-xl hover:border-slate-700 transition duration-300 flex flex-col justify-between">
-                            <div
-                                onclick="openLightbox(${idx})"
-                                class="relative aspect-square bg-slate-950 overflow-hidden cursor-pointer flex items-center justify-center"
-                            >
-                                ${videoBadge}
-                                <img
-                                    src="${highResThumb}"
-                                    alt="${escapeHtml(file.name)}"
-                                    class="object-cover w-full h-full transform group-hover:scale-105 transition duration-500"
-                                    loading="lazy"
-                                />
-                                <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition duration-300 flex items-center justify-center">
-                                    <span class="bg-white/10 backdrop-blur-md p-2.5 rounded-full border border-white/20">
-                                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7"></path>
-                                        </svg>
-                                    </span>
-                                </div>
-                            </div>
-                            <div class="p-3 bg-slate-900/90 border-t border-slate-800/50">
-                                <p class="text-xs font-medium text-slate-300 truncate mb-2.5" title="${escapeHtml(file.name)}">
-                                    ${escapeHtml(file.name)}
-                                </p>
-                                <a
-                                    href="${file.webContentLink}"
-                                    download
-                                    target="_blank"
-                                    class="w-full flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-[11px] font-bold py-1.5 px-3 rounded-lg transition duration-200"
-                                >
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"></path>
-                                    </svg>
-                                    Tải Xuống
-                                </a>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
+                appendGallery(state.images, 0);
             } else {
                 imageCountContainer.classList.add('hidden');
                 galleryGrid.innerHTML = '';
@@ -613,20 +654,16 @@
 
             let mediaHtml = '';
             if (isVideo) {
-                let videoUrl = '';
-                if (state.accessToken) {
-                    videoUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&access_token=${state.accessToken}`;
-                } else if (state.apiKey.trim()) {
-                    videoUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${state.apiKey.trim()}`;
-                }
+                // Sử dụng Google Drive Preview Player (Iframe) để tận dụng hạ tầng stream YouTube của Google (hết giật lag)
+                const embedUrl = `https://drive.google.com/file/d/${file.id}/preview`;
                 mediaHtml = `
-                    <video
-                        src="${videoUrl}"
-                        controls
-                        autoplay
-                        class="max-w-full max-h-[80vh] rounded shadow-2xl focus:outline-none"
+                    <iframe
+                        src="${embedUrl}"
+                        class="w-[85vw] h-[55vh] sm:w-[80vw] sm:h-[65vh] max-w-4xl rounded-xl shadow-2xl border-0 bg-black"
+                        allow="autoplay; encrypted-media; picture-in-picture"
+                        allowfullscreen
                         onclick="event.stopPropagation()"
-                    ></video>
+                    ></iframe>
                 `;
             } else {
                 const highResUrl = file.thumbnailLink ? file.thumbnailLink.replace(/=s\d+/, '=w1600') : '';
