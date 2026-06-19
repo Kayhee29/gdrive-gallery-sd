@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GDrive Gallery Pro - OAuth2 & Shared Drive Support</title>
+
+    <!-- Tailwind CSS để render UI hiện đại -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Google Identity Services (GIS) SDK mới nhất cho OAuth2 -->
+    <script src="https://accounts.google.com/gsi/client" async defer onload="gisLoaded()"></script>
+</head>
+
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+
+    <div class="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <div class="inline-flex items-center gap-2 px-3 py-1 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-xs font-semibold mb-3">
+                <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                Hỗ trợ Shared Drive & Không giới hạn ảnh
+            </div>
+            <h1 class="text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+                GDrive <span class="text-emerald-400">Gallery Pro</span>
+            </h1>
+            <p class="mt-2 text-sm sm:text-base text-slate-400 max-w-2xl mx-auto">
+                Giải pháp duyệt ảnh chuyên nghiệp dạng lưới cực mượt, tải nhanh bằng API chính thức của Google, vượt qua mọi giới hạn phân trang.
+            </p>
+        </header>
+
+        <!-- Khung cấu hình -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl mb-8">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-end">
+                <!-- Ô nhập Client ID -->
+                <div class="lg:col-span-4">
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
+                        Google Client ID:
+                    </label>
+                    <input
+                        id="clientIdInput"
+                        type="text"
+                        placeholder="Điền OAuth Client ID của bạn..."
+                        class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition"
+                    />
+                </div>
+
+                <!-- Ô nhập link Drive -->
+                <div class="lg:col-span-5">
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
+                        Link Thư mục Google Drive (Cá nhân hoặc Shared Drive):
+                    </label>
+                    <input
+                        id="folderUrlInput"
+                        type="text"
+                        disabled
+                        placeholder="Vui lòng đăng nhập trước..."
+                        class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 disabled:opacity-50 transition"
+                    />
+                </div>
+
+                <!-- Nút hành động -->
+                <div class="lg:col-span-3 flex gap-3 w-full" id="actionButtonContainer">
+                    <!-- Sẽ render động bằng JS -->
+                </div>
+            </div>
+
+            <!-- Thông tin User sau đăng nhập -->
+            <div id="userInfoContainer" class="hidden mt-4 pt-4 border-t border-slate-800/60 flex items-center gap-3 text-xs text-slate-400">
+                <!-- Sẽ render động bằng JS -->
+            </div>
+        </div>
+
+        <!-- Thông báo lỗi / trạng thái -->
+        <div id="errorContainer" class="hidden bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl text-sm mb-6 flex items-center gap-2">
+            <!-- Sẽ render động bằng JS -->
+        </div>
+
+        <!-- Trạng thái quét ảnh -->
+        <div id="loadingContainer" class="hidden text-center py-12">
+            <div class="inline-block animate-bounce bg-slate-900 border border-slate-800 text-emerald-400 font-medium px-6 py-3 rounded-full shadow-lg">
+                🚀 <span id="loadingProgressText">Đang quét...</span>
+            </div>
+        </div>
+
+        <!-- Bộ đếm ảnh -->
+        <div id="imageCountContainer" class="hidden flex justify-between items-center mb-6">
+            <h2 class="text-lg font-bold text-slate-300">Bộ Sưu Tập Ảnh</h2>
+            <div class="bg-slate-900 border border-slate-800 px-4 py-1.5 rounded-full text-xs text-slate-400">
+                Đã quét được: <span id="imageCountVal" class="text-emerald-400 font-bold">0</span> ảnh
+            </div>
+        </div>
+
+        <!-- Lưới hiển thị ảnh (Gallery Grid) -->
+        <div id="galleryGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            <!-- Sẽ render danh sách ảnh động bằng JS -->
+        </div>
+    </div>
+
+    <!-- Lightbox / Xem ảnh phóng to toàn màn hình -->
+    <div id="lightboxContainer" class="hidden fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center p-4">
+        <!-- Sẽ render động bằng JS -->
+    </div>
+
+    <script>
+        const state = {
+            clientId: localStorage.getItem('gdrive_client_id') || '841411591181-ae9rr2m03d4o7t5rfhvul02knth3flmg.apps.googleusercontent.com',
+            folderUrl: '',
+            accessToken: null,
+            images: [],
+            loading: false,
+            loadingProgress: '',
+            errorMsg: '',
+            lightboxIndex: null,
+            userInfo: null,
+            isSdkReady: false
+        };
+
+        // DOM elements
+        const clientIdInput = document.getElementById('clientIdInput');
+        const folderUrlInput = document.getElementById('folderUrlInput');
+        const actionButtonContainer = document.getElementById('actionButtonContainer');
+        const userInfoContainer = document.getElementById('userInfoContainer');
+        const errorContainer = document.getElementById('errorContainer');
+        const loadingContainer = document.getElementById('loadingContainer');
+        const loadingProgressText = document.getElementById('loadingProgressText');
+        const imageCountContainer = document.getElementById('imageCountContainer');
+        const imageCountVal = document.getElementById('imageCountVal');
+        const galleryGrid = document.getElementById('galleryGrid');
+        const lightboxContainer = document.getElementById('lightboxContainer');
+
+        // Khởi tạo các giá trị ban đầu
+        clientIdInput.value = state.clientId;
+
+        // Lưu Client ID vào LocalStorage khi thay đổi
+        clientIdInput.addEventListener('input', (e) => {
+            state.clientId = e.target.value;
+            localStorage.setItem('gdrive_client_id', state.clientId);
+        });
+
+        folderUrlInput.addEventListener('input', (e) => {
+            state.folderUrl = e.target.value;
+        });
+
+        // Google GSI script load callback
+        window.gisLoaded = function() {
+            state.isSdkReady = true;
+            renderAuthSection();
+        };
+
+        // Kiểm tra xem google SDK đã tải sẵn chưa (đề phòng script loaded trước khi js chạy)
+        if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+            state.isSdkReady = true;
+        }
+
+        // Trích xuất Folder ID từ đường dẫn Google Drive
+        const extractFolderId = (url) => {
+            if (!url) return null;
+            const matches = url.match(/folders\/([a-zA-Z0-9-_]+)/);
+            return matches ? matches[1] : url.trim();
+        };
+
+        // Show Error với tự động ẩn sau 6s
+        let errorTimeout;
+        const showError = (msg) => {
+            state.errorMsg = msg;
+            if (msg) {
+                errorContainer.innerHTML = `⚠️ ${msg}`;
+                errorContainer.classList.remove('hidden');
+                clearTimeout(errorTimeout);
+                errorTimeout = setTimeout(() => {
+                    state.errorMsg = '';
+                    errorContainer.classList.add('hidden');
+                }, 6000);
+            } else {
+                errorContainer.classList.add('hidden');
+            }
+        };
+
+        // Thực hiện luồng Đăng nhập OAuth2 của Google
+        window.handleLogin = () => {
+            if (!state.clientId.trim()) {
+                showError('Vui lòng nhập Google Client ID trước khi đăng nhập!');
+                return;
+            }
+            showError('');
+
+            try {
+                const client = google.accounts.oauth2.initTokenClient({
+                    client_id: state.clientId.trim(),
+                    scope: 'https://www.googleapis.com/auth/drive.readonly',
+                    callback: (response) => {
+                        if (response && response.access_token) {
+                            state.accessToken = response.access_token;
+                            fetchUserInfo(response.access_token);
+                            renderAuthSection();
+                            folderUrlInput.disabled = false;
+                            folderUrlInput.placeholder = "Dán link thư mục hoặc Folder ID...";
+                        } else {
+                            showError('Đăng nhập thất bại hoặc bị hủy.');
+                        }
+                    },
+                    error_callback: (err) => {
+                        showError('Lỗi khởi tạo OAuth2: ' + err.message);
+                    }
+                });
+                client.requestAccessToken({ prompt: 'consent' });
+            } catch (err) {
+                showError('Không thể khởi tạo Google Auth Client. Hãy chắc chắn Client ID của bạn chính xác!');
+            }
+        };
+
+        // Lấy thông tin cơ bản của tài khoản
+        const fetchUserInfo = async (token) => {
+            try {
+                const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    state.userInfo = await res.json();
+                    renderUserInfo();
+                }
+            } catch (err) {
+                console.error('Không thể lấy thông tin user:', err);
+            }
+        };
+
+        // Hàm quét ảnh từ thư mục chỉ định
+        window.handleScan = async () => {
+            if (!state.accessToken) {
+                showError('Vui lòng đăng nhập Google trước!');
+                return;
+            }
+
+            const folderId = extractFolderId(state.folderUrl);
+            if (!folderId) {
+                showError('Vui lòng nhập Link hoặc ID Thư mục Google Drive hợp lệ!');
+                return;
+            }
+
+            state.loading = true;
+            state.images = [];
+            showError('');
+            renderLoading();
+            renderGallery();
+
+            let allFiles = [];
+            let nextPageToken = '';
+            let pageCount = 1;
+
+            try {
+                do {
+                    state.loadingProgress = `Đang quét trang thứ ${pageCount}... (Đã tìm thấy ${allFiles.length} ảnh)`;
+                    renderLoading();
+
+                    let query = `'${folderId}' in parents and mimeType contains 'image/' and trashed = false`;
+                    let url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(query)}` +
+                        `&pageSize=100` +
+                        `&supportsAllDrives=true` +
+                        `&includeItemsFromAllDrives=true` +
+                        `&fields=nextPageToken,files(id,name,webContentLink,thumbnailLink,size)`;
+
+                    if (nextPageToken) {
+                        url += `&pageToken=${nextPageToken}`;
+                    }
+
+                    const response = await fetch(url, {
+                        headers: { 'Authorization': `Bearer ${state.accessToken}` }
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error?.message || 'Lỗi kết nối API Google Drive');
+                    }
+
+                    const data = await response.json();
+
+                    if (data.files && data.files.length > 0) {
+                        allFiles = allFiles.concat(data.files);
+                    }
+
+                    nextPageToken = data.nextPageToken || '';
+                    pageCount++;
+
+                } while (nextPageToken);
+
+                if (allFiles.length === 0) {
+                    showError('Không tìm thấy ảnh nào trong thư mục này. Hãy chắc chắn folder có chứa file ảnh.');
+                } else {
+                    state.images = allFiles;
+                }
+
+            } catch (err) {
+                showError('Lỗi quét Drive: ' + err.message);
+            } finally {
+                state.loading = false;
+                state.loadingProgress = '';
+                renderLoading();
+                renderGallery();
+            }
+        };
+
+        // Render Authentication Section (Login/Scan Button)
+        function renderAuthSection() {
+            if (!state.accessToken) {
+                actionButtonContainer.innerHTML = `
+                    <button
+                        onclick="handleLogin()"
+                        ${!state.isSdkReady ? 'disabled' : ''}
+                        class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900/50 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
+                    >
+                        ${state.isSdkReady ? '🔑 Đăng Nhập' : '⏳ Đang tải SDK...'}
+                    </button>
+                `;
+            } else {
+                actionButtonContainer.innerHTML = `
+                    <button
+                        onclick="handleScan()"
+                        ${state.loading ? 'disabled' : ''}
+                        class="w-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-800 text-slate-950 font-bold py-3 px-6 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/20"
+                    >
+                        ${state.loading ? `
+                            <span class="flex items-center gap-2">
+                                <svg class="animate-spin h-5 w-5 text-slate-950" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Đang quét...
+                            </span>
+                        ` : `
+                            📸 Quét Thư Mục
+                        `}
+                    </button>
+                `;
+            }
+        }
+
+        // Render User Info
+        function renderUserInfo() {
+            if (state.userInfo) {
+                userInfoContainer.innerHTML = `
+                    <img src="${state.userInfo.picture}" class="w-6 h-6 rounded-full border border-slate-700" alt="Avatar" />
+                    <span>Đang đăng nhập bằng: <strong class="text-slate-200">${state.userInfo.name} (${state.userInfo.email})</strong></span>
+                `;
+                userInfoContainer.classList.remove('hidden');
+            } else {
+                userInfoContainer.classList.add('hidden');
+            }
+        }
+
+        // Render Loading
+        function renderLoading() {
+            if (state.loading) {
+                loadingProgressText.innerText = state.loadingProgress || 'Đang quét...';
+                loadingContainer.classList.remove('hidden');
+            } else {
+                loadingContainer.classList.add('hidden');
+            }
+        }
+
+        // Render Gallery Grid & Image Counter
+        function renderGallery() {
+            if (state.images.length > 0) {
+                imageCountVal.innerText = state.images.length;
+                imageCountContainer.classList.remove('hidden');
+
+                galleryGrid.innerHTML = state.images.map((file, idx) => {
+                    const highResThumb = file.thumbnailLink ? file.thumbnailLink.replace(/=s\d+/, '=w400') : '';
+                    return `
+                        <div class="group bg-slate-900 border border-slate-800/80 rounded-xl overflow-hidden shadow-md hover:shadow-xl hover:border-slate-700 transition duration-300 flex flex-col justify-between">
+                            <div
+                                onclick="openLightbox(${idx})"
+                                class="relative aspect-square bg-slate-950 overflow-hidden cursor-pointer flex items-center justify-center"
+                            >
+                                <img
+                                    src="${highResThumb}"
+                                    alt="${escapeHtml(file.name)}"
+                                    class="object-cover w-full h-full transform group-hover:scale-105 transition duration-500"
+                                    loading="lazy"
+                                />
+                                <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition duration-300 flex items-center justify-center">
+                                    <span class="bg-white/10 backdrop-blur-md p-2.5 rounded-full border border-white/20">
+                                        <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7"></path>
+                                        </svg>
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="p-3 bg-slate-900/90 border-t border-slate-800/50">
+                                <p class="text-xs font-medium text-slate-300 truncate mb-2.5" title="${escapeHtml(file.name)}">
+                                    ${escapeHtml(file.name)}
+                                </p>
+                                <a
+                                    href="${file.webContentLink}"
+                                    download
+                                    target="_blank"
+                                    class="w-full flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-[11px] font-bold py-1.5 px-3 rounded-lg transition duration-200"
+                                >
+                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"></path>
+                                    </svg>
+                                    Tải Xuống
+                                </a>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                imageCountContainer.classList.add('hidden');
+                galleryGrid.innerHTML = '';
+            }
+        }
+
+        // Helper escape HTML strings
+        function escapeHtml(text) {
+            if (!text) return '';
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, function(m) { return map[m]; });
+        }
+
+        // Lightbox Actions
+        window.openLightbox = (index) => {
+            state.lightboxIndex = index;
+            renderLightbox();
+            lightboxContainer.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+        };
+
+        window.closeLightbox = () => {
+            state.lightboxIndex = null;
+            lightboxContainer.classList.add('hidden');
+            lightboxContainer.innerHTML = '';
+            document.body.classList.remove('overflow-hidden');
+        };
+
+        window.nextImage = (e) => {
+            if (e) e.stopPropagation();
+            state.lightboxIndex = (state.lightboxIndex + 1) % state.images.length;
+            renderLightbox();
+        };
+
+        window.prevImage = (e) => {
+            if (e) e.stopPropagation();
+            state.lightboxIndex = (state.lightboxIndex - 1 + state.images.length) % state.images.length;
+            renderLightbox();
+        };
+
+        // Render Lightbox Content
+        function renderLightbox() {
+            if (state.lightboxIndex === null || state.images.length === 0) return;
+            const file = state.images[state.lightboxIndex];
+            const highResUrl = file.thumbnailLink ? file.thumbnailLink.replace(/=s\d+/, '=w1600') : '';
+
+            lightboxContainer.innerHTML = `
+                <!-- Nút Đóng -->
+                <button
+                    onclick="closeLightbox()"
+                    class="absolute top-4 right-4 bg-white/10 hover:bg-white/20 p-2.5 rounded-full border border-white/10 transition z-50 text-white"
+                >
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+
+                <!-- Ảnh Phóng To -->
+                <div class="relative max-w-5xl max-h-[80vh] flex items-center justify-center">
+                    <!-- Nút Trước -->
+                    <button
+                        onclick="prevImage(event)"
+                        class="absolute left-[-20px] sm:left-[-60px] bg-white/10 hover:bg-white/20 p-3 rounded-full border border-white/10 transition text-white"
+                    >
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"></path>
+                        </svg>
+                    </button>
+
+                    <img
+                        src="${highResUrl}"
+                        alt="Phóng to"
+                        class="max-w-full max-h-[80vh] object-contain rounded shadow-2xl"
+                        onclick="event.stopPropagation()"
+                    />
+
+                    <!-- Nút Tiếp Theo -->
+                    <button
+                        onclick="nextImage(event)"
+                        class="absolute right-[-20px] sm:right-[-60px] bg-white/10 hover:bg-white/20 p-3 rounded-full border border-white/10 transition text-white"
+                    >
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Thông tin dưới ảnh Lightbox -->
+                <div class="mt-4 text-center max-w-xl" onclick="event.stopPropagation()">
+                    <p class="text-sm font-semibold text-white truncate">${escapeHtml(file.name)}</p>
+                    <div class="mt-2 flex items-center justify-center gap-3">
+                        <span class="text-xs text-slate-400">Ảnh ${state.lightboxIndex + 1} / ${state.images.length}</span>
+                        <a
+                            href="${file.webContentLink}"
+                            download
+                            target="_blank"
+                            class="bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-xs font-bold px-4 py-1.5 rounded-lg transition flex items-center gap-1.5"
+                        >
+                            Tải ảnh gốc
+                        </a>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Lắng nghe phím mũi tên & phím Esc khi mở Lightbox
+        document.addEventListener('keydown', (e) => {
+            if (state.lightboxIndex === null) return;
+            if (e.key === 'ArrowRight') nextImage();
+            if (e.key === 'ArrowLeft') prevImage();
+            if (e.key === 'Escape') closeLightbox();
+        });
+
+        // Chạy lần đầu
+        renderAuthSection();
+    </script>
+</body>
+
+</html>
