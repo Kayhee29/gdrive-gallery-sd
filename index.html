@@ -30,24 +30,49 @@
             </p>
         </header>
 
+        <!-- Shared View Banner (Hiển thị khi mở qua Quicklink) -->
+        <div id="sharedViewBanner" class="hidden bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl mb-8 flex justify-between items-center animate-fade-in">
+            <div class="flex items-center gap-2 text-xs sm:text-sm text-slate-300">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                Đang xem chế độ chia sẻ nhanh (Không cần đăng nhập)
+            </div>
+            <a href="?" class="text-xs font-bold text-blue-400 hover:text-blue-300 transition">
+                ➕ Tạo Bộ Sưu Tập Riêng
+            </a>
+        </div>
+
         <!-- Khung cấu hình -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl mb-8">
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-end">
+        <div id="configPanel" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl mb-8">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
                 <!-- Ô nhập Client ID -->
-                <div class="lg:col-span-4">
+                <div class="lg:col-span-3">
                     <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
                         Google Client ID:
                     </label>
                     <input
                         id="clientIdInput"
                         type="text"
-                        placeholder="Điền OAuth Client ID của bạn..."
+                        placeholder="OAuth Client ID..."
+                        class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition"
+                    />
+                </div>
+
+                <!-- Ô nhập API Key -->
+                <div class="lg:col-span-3">
+                    <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 flex justify-between">
+                        <span>Google API Key (Chia sẻ):</span>
+                        <a href="https://console.cloud.google.com/apis/credentials" target="_blank" class="text-[10px] text-blue-400 hover:underline">Tạo Key ↗</a>
+                    </label>
+                    <input
+                        id="apiKeyInput"
+                        type="text"
+                        placeholder="API Key (Tùy chọn)..."
                         class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition"
                     />
                 </div>
 
                 <!-- Ô nhập link Drive -->
-                <div class="lg:col-span-5">
+                <div class="lg:col-span-4">
                     <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
                         Link Thư mục Google Drive (Cá nhân hoặc Shared Drive):
                     </label>
@@ -55,15 +80,28 @@
                         id="folderUrlInput"
                         type="text"
                         disabled
-                        placeholder="Vui lòng đăng nhập trước..."
+                        placeholder="Vui lòng đăng nhập hoặc điền API Key..."
                         class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 disabled:opacity-50 transition"
                     />
                 </div>
 
                 <!-- Nút hành động -->
-                <div class="lg:col-span-3 flex gap-3 w-full" id="actionButtonContainer">
+                <div class="lg:col-span-2 flex gap-3 w-full" id="actionButtonContainer">
                     <!-- Sẽ render động bằng JS -->
                 </div>
+            </div>
+
+            <!-- Dòng nút Tạo Link Chia Sẻ -->
+            <div id="shareSection" class="hidden mt-4 pt-4 border-t border-slate-800/60 flex flex-wrap justify-between items-center gap-3">
+                <span class="text-xs text-slate-400">
+                    💡 Thư mục phải ở chế độ <strong>Công khai (Anyone with link can view)</strong> để chia sẻ không cần đăng nhập.
+                </span>
+                <button
+                    onclick="generateShareLink()"
+                    class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2.5 px-4 rounded-lg transition flex items-center gap-1.5 shadow"
+                >
+                    🔗 Tạo & Copy Link Chia Sẻ
+                </button>
             </div>
 
             <!-- Thông tin User sau đăng nhập -->
@@ -104,9 +142,14 @@
     </div>
 
     <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const sharedFolder = urlParams.get('folder');
+        const sharedApiKey = urlParams.get('apiKey');
+
         const state = {
             clientId: localStorage.getItem('gdrive_client_id') || '841411591181-ae9rr2m03d4o7t5rfhvul02knth3flmg.apps.googleusercontent.com',
-            folderUrl: '',
+            apiKey: sharedApiKey || localStorage.getItem('gdrive_api_key') || '',
+            folderUrl: sharedFolder || '',
             accessToken: null,
             images: [],
             loading: false,
@@ -114,13 +157,18 @@
             errorMsg: '',
             lightboxIndex: null,
             userInfo: null,
-            isSdkReady: false
+            isSdkReady: false,
+            isSharedView: !!(sharedFolder && sharedApiKey)
         };
 
         // DOM elements
+        const configPanel = document.getElementById('configPanel');
+        const sharedViewBanner = document.getElementById('sharedViewBanner');
         const clientIdInput = document.getElementById('clientIdInput');
+        const apiKeyInput = document.getElementById('apiKeyInput');
         const folderUrlInput = document.getElementById('folderUrlInput');
         const actionButtonContainer = document.getElementById('actionButtonContainer');
+        const shareSection = document.getElementById('shareSection');
         const userInfoContainer = document.getElementById('userInfoContainer');
         const errorContainer = document.getElementById('errorContainer');
         const loadingContainer = document.getElementById('loadingContainer');
@@ -130,17 +178,26 @@
         const galleryGrid = document.getElementById('galleryGrid');
         const lightboxContainer = document.getElementById('lightboxContainer');
 
-        // Khởi tạo các giá trị ban đầu
+        // Khởi tạo các giá trị ban đầu vào Form
         clientIdInput.value = state.clientId;
+        apiKeyInput.value = state.apiKey;
+        folderUrlInput.value = state.folderUrl;
 
-        // Lưu Client ID vào LocalStorage khi thay đổi
+        // Lưu dữ liệu vào LocalStorage khi thay đổi
         clientIdInput.addEventListener('input', (e) => {
             state.clientId = e.target.value;
             localStorage.setItem('gdrive_client_id', state.clientId);
         });
 
+        apiKeyInput.addEventListener('input', (e) => {
+            state.apiKey = e.target.value;
+            localStorage.setItem('gdrive_api_key', state.apiKey);
+            renderAuthSection();
+        });
+
         folderUrlInput.addEventListener('input', (e) => {
             state.folderUrl = e.target.value;
+            renderAuthSection();
         });
 
         // Google GSI script load callback
@@ -195,8 +252,6 @@
                             state.accessToken = response.access_token;
                             fetchUserInfo(response.access_token);
                             renderAuthSection();
-                            folderUrlInput.disabled = false;
-                            folderUrlInput.placeholder = "Dán link thư mục hoặc Folder ID...";
                         } else {
                             showError('Đăng nhập thất bại hoặc bị hủy.');
                         }
@@ -226,10 +281,10 @@
             }
         };
 
-        // Hàm quét ảnh từ thư mục chỉ định
+        // Hàm quét ảnh từ thư mục chỉ định (hỗ trợ cả OAuth token và API Key)
         window.handleScan = async () => {
-            if (!state.accessToken) {
-                showError('Vui lòng đăng nhập Google trước!');
+            if (!state.accessToken && !state.apiKey.trim()) {
+                showError('Vui lòng đăng nhập Google hoặc nhập API Key trước!');
                 return;
             }
 
@@ -261,17 +316,21 @@
                         `&includeItemsFromAllDrives=true` +
                         `&fields=nextPageToken,files(id,name,webContentLink,thumbnailLink,size)`;
 
-                    if (nextPageToken) {
-                        url += `&pageToken=${nextPageToken}`;
+                    // Nếu dùng API Key (không có accessToken), ta truyền qua tham số key
+                    if (!state.accessToken && state.apiKey.trim()) {
+                        url += `&key=${state.apiKey.trim()}`;
                     }
 
-                    const response = await fetch(url, {
-                        headers: { 'Authorization': `Bearer ${state.accessToken}` }
-                    });
+                    const headers = {};
+                    if (state.accessToken) {
+                        headers['Authorization'] = `Bearer ${state.accessToken}`;
+                    }
+
+                    const response = await fetch(url, { headers });
 
                     if (!response.ok) {
                         const errorData = await response.json();
-                        throw new Error(errorData.error?.message || 'Lỗi kết nối API Google Drive');
+                        throw new Error(errorData.error?.message || 'Lỗi kết nối API Google Drive. Nếu bạn sử dụng API Key, vui lòng kiểm tra xem thư mục Drive đã được chia sẻ ở chế độ "Công Khai" (Anyone with the link can view) chưa.');
                     }
 
                     const data = await response.json();
@@ -303,17 +362,16 @@
 
         // Render Authentication Section (Login/Scan Button)
         function renderAuthSection() {
-            if (!state.accessToken) {
-                actionButtonContainer.innerHTML = `
-                    <button
-                        onclick="handleLogin()"
-                        ${!state.isSdkReady ? 'disabled' : ''}
-                        class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900/50 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
-                    >
-                        ${state.isSdkReady ? '🔑 Đăng Nhập' : '⏳ Đang tải SDK...'}
-                    </button>
-                `;
+            // Cho phép nhập Link thư mục nếu có Token hoặc có API Key
+            if (state.accessToken || state.apiKey.trim()) {
+                folderUrlInput.disabled = false;
+                folderUrlInput.placeholder = "Dán link thư mục hoặc Folder ID...";
             } else {
+                folderUrlInput.disabled = true;
+                folderUrlInput.placeholder = "Vui lòng đăng nhập hoặc điền API Key...";
+            }
+
+            if (state.accessToken || (state.apiKey.trim() && state.folderUrl.trim())) {
                 actionButtonContainer.innerHTML = `
                     <button
                         onclick="handleScan()"
@@ -333,8 +391,52 @@
                         `}
                     </button>
                 `;
+            } else {
+                actionButtonContainer.innerHTML = `
+                    <button
+                        onclick="handleLogin()"
+                        ${!state.isSdkReady ? 'disabled' : ''}
+                        class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900/50 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold py-3 px-6 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/20"
+                    >
+                        ${state.isSdkReady ? '🔑 Đăng Nhập' : '⏳ Đang tải SDK...'}
+                    </button>
+                `;
+            }
+
+            renderShareSection();
+        }
+
+        // Hiển thị phần Tạo Link Chia Sẻ khi đủ điều kiện
+        function renderShareSection() {
+            if (state.folderUrl.trim() && state.apiKey.trim()) {
+                shareSection.classList.remove('hidden');
+            } else {
+                shareSection.classList.add('hidden');
             }
         }
+
+        // Tạo Link Chia Sẻ
+        window.generateShareLink = () => {
+            const folderId = extractFolderId(state.folderUrl);
+            if (!folderId) {
+                showError('Vui lòng nhập thư mục Google Drive hợp lệ trước khi tạo link!');
+                return;
+            }
+            if (!state.apiKey.trim()) {
+                showError('Vui lòng nhập API Key để tạo link chia sẻ không cần đăng nhập!');
+                return;
+            }
+
+            const baseUrl = window.location.origin + window.location.pathname;
+            const shareUrl = `${baseUrl}?folder=${encodeURIComponent(folderId)}&apiKey=${encodeURIComponent(state.apiKey.trim())}`;
+
+            // Copy vào clipboard
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                alert('Đã sao chép link chia sẻ vào bộ nhớ tạm! Gửi link này cho bất kỳ ai để xem ảnh trực tiếp.');
+            }).catch(err => {
+                showError('Không thể tự động copy. Hãy copy link thủ công sau: ' + shareUrl);
+            });
+        };
 
         // Render User Info
         function renderUserInfo() {
@@ -525,8 +627,18 @@
             if (e.key === 'Escape') closeLightbox();
         });
 
-        // Chạy lần đầu
+        // Tự động quét và hiển thị nếu truy cập qua Quicklink (Chế độ chia sẻ)
+        async function checkQuicklink() {
+            if (state.isSharedView) {
+                configPanel.classList.add('hidden');
+                sharedViewBanner.classList.remove('hidden');
+                await handleScan();
+            }
+        }
+
+        // Chạy khởi tạo giao diện
         renderAuthSection();
+        checkQuicklink();
     </script>
 </body>
 
